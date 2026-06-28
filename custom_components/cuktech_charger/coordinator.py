@@ -8,7 +8,6 @@ from datetime import timedelta
 import logging
 from typing import Any
 
-from homeassistant.components.bluetooth import async_ble_device_from_address
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 from homeassistant.const import CONF_ADDRESS
@@ -112,9 +111,12 @@ class CuktechChargerCoordinator(DataUpdateCoordinator[ChargerState]):
         )
 
         token_bytes = bytes.fromhex(token)
-        ble_device = async_ble_device_from_address(hass, mac.upper(), connectable=True)
+        # Don't pass ble_device — HA's BLEDevice path-based references are
+        # fragile (device may go away between getting the reference and
+        # connecting). Using the raw MAC address is reliable and works
+        # correctly as long as another scanner isn't running simultaneously.
         self._controller = CuktechBLEController(
-            mac=mac, token=token_bytes, ble_device=ble_device
+            mac=mac, token=token_bytes,
         )
         self._mac = mac
         self._ble_key = ble_key

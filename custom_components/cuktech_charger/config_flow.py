@@ -10,11 +10,9 @@ import voluptuous as vol
 from homeassistant import config_entries
 from homeassistant.components.bluetooth import (
     BluetoothServiceInfo,
-    async_ble_device_from_address,
     async_discovered_service_info,
 )
 from homeassistant.const import CONF_ADDRESS
-from homeassistant.core import HomeAssistant
 from homeassistant.data_entry_flow import FlowResult
 from homeassistant.helpers import config_validation as cv
 
@@ -38,13 +36,13 @@ MANUAL_MAC_SCHEMA = vol.Schema(
 
 
 async def _validate_auth(
-    hass: HomeAssistant, mac: str, token: str, ble_key: str | None
+    mac: str, token: str, ble_key: str | None
 ) -> dict[str, str]:
     """Validate authentication by connecting to the device.
 
-    Uses HA's Bluetooth manager to obtain a BLEDevice so the connection
-    shares the adapter properly (no scanner-slot contention), following
-    the same pattern as xiaomi_ble.
+    Uses raw MAC address for the connection.  HA's scanner has already
+    finished at this point (the device was just picked from the scan
+    results), so there is no scanner-slot contention to worry about.
     """
     errors: dict[str, str] = {}
 
@@ -74,11 +72,7 @@ async def _validate_auth(
         errors["base"] = "missing_deps"
         return errors
 
-    ble_device = async_ble_device_from_address(hass, mac.upper(), connectable=True)
-    if ble_device is None:
-        _LOGGER.warning("No BLEDevice found for %s — falling back to address", mac)
-
-    ctrl = CuktechBLEController(mac=mac, token=token_bytes, ble_device=ble_device)
+    ctrl = CuktechBLEController(mac=mac, token=token_bytes)
     try:
         connected = await ctrl.connect()
         if not connected:
@@ -299,7 +293,7 @@ class CuktechChargerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
             # Validate by connecting
             errs = await _validate_auth(
-                self.hass, self._discovery_info.address, token, ble_key
+                self._discovery_info.address, token, ble_key
             )
             if not errs:
                 return self.async_create_entry(
