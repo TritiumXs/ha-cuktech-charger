@@ -66,6 +66,11 @@ else:
     _BLEAK_IMPORT_ERROR = None
 
 try:
+    from bleak_retry_connector import establish_connection as _establish_connection
+except ImportError:
+    _establish_connection = None
+
+try:
     from cryptography.hazmat.primitives.kdf.hkdf import HKDF
     from cryptography.hazmat.primitives.hmac import HMAC as CryptoHMAC
     from cryptography.hazmat.primitives import hashes
@@ -270,10 +275,18 @@ class CuktechBLEController:
             return data
 
     async def connect(self):
-        """连接到设备。"""
+        """Connect to device using HA's bleak-retry-connector when available.
+
+        Falls back to raw BleakClient.connect() for standalone usage.
+        """
         print(f"[*] 正在连接 {self.mac}...")
-        self.client = BleakClient(self.mac)
-        await self.client.connect()
+        if _establish_connection is not None:
+            self.client = await _establish_connection(
+                BleakClient, self.mac, "CUKTECH Charger", max_attempts=5
+            )
+        else:
+            self.client = BleakClient(self.mac)
+            await self.client.connect()
         print(f"[+] 已连接! MTU={self.client.mtu_size}")
 
         # 提前订阅所有通知通道 (避免 CCCD 订阅延迟导致丢失通知)
