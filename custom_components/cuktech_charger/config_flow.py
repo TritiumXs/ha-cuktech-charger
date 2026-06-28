@@ -17,7 +17,7 @@ from homeassistant.data_entry_flow import FlowResult
 from homeassistant.helpers import config_validation as cv
 
 from .const import DOMAIN
-from ._ble import UUID_FE95, CuktechBLEController, require_runtime_dependencies
+from ._ble import CuktechBLEController, require_runtime_dependencies
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -86,23 +86,14 @@ async def _validate_auth(
     return errors
 
 
-def _has_cuktech_uuid(
-    service_uuids: list[str] | None = None,
-    service_data: dict[str, bytes] | None = None,
-) -> bool:
-    """Return True if UUID_FE95 appears in either service_uuids or service_data keys.
+def _is_cuktech_device(name: str | None) -> bool:
+    """Return True if the BLE device name matches the known CUKTECH pattern.
 
-    The CUKTECH charger advertises via the *Service Data* AD type (0x16).
-    Some BLE backends expose the UUID in ``service_uuids``, others only in
-    ``service_data`` keys — therefore both must be checked.
+    CUKTECH chargers broadcast a name like ``njcuk.fitting.ad1204``.
+    Matching on ``"njcuk"`` (case-insensitive) is used by the original
+    cuktech-ble-controller project and is more reliable than UUID matching.
     """
-    if service_uuids:
-        if any(u.lower() == UUID_FE95 for u in service_uuids):
-            return True
-    if service_data:
-        if any(u.lower() == UUID_FE95 for u in service_data):
-            return True
-    return False
+    return bool(name and "njcuk" in name.lower())
     return discovery_info.name or "CUKTECH Charger"
 
 
@@ -158,16 +149,8 @@ class CuktechChargerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         try:
             service_infos = async_discovered_service_info(self.hass)
             for info in service_infos:
-                uuids: list[str] = getattr(info, "service_uuids", None) or []
-                srv_data: dict = getattr(info, "service_data", None) or {}
-                # also try .advertisement.* for HA < 2024
-                adv = getattr(info, "advertisement", None)
-                if adv is not None:
-                    if not uuids:
-                        uuids = getattr(adv, "service_uuids", []) or []
-                    if not srv_data:
-                        srv_data = getattr(adv, "service_data", {}) or {}
-                if _has_cuktech_uuid(uuids, srv_data):
+                name: str | None = getattr(info, "name", None)
+                if _is_cuktech_device(name):
                     self._discovered_devices[info.address] = info
 
             if self._discovered_devices:
@@ -177,7 +160,7 @@ class CuktechChargerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 )
             else:
                 _LOGGER.info(
-                    "HA Bluetooth cache had %d total device(s), none with UUID 0xFE95",
+                    "HA Bluetooth cache had %d total device(s), no CUKTECH (njcuk) name",
                     len(service_infos),
                 )
         except Exception as exc:
@@ -195,19 +178,17 @@ class CuktechChargerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 for mac, (device, adv) in results.items():
                     if adv is None:
                         continue
-                    uuids: list[str] = getattr(adv, "service_uuids", []) or []
-                    srv_data: dict = getattr(adv, "service_data", {}) or {}
-                    if _has_cuktech_uuid(uuids, srv_data):
-                        name = getattr(adv, "local_name", None) or getattr(
-                            device, "name", None
-                        ) or "CUKTECH Charger"
+                    name = getattr(adv, "local_name", None) or getattr(
+                        device, "name", None
+                    )
+                    if _is_cuktech_device(name):
                         self._discovered_devices[mac] = BluetoothServiceInfo(
-                            name=name,
+                            name=name or "CUKTECH Charger",
                             address=mac,
                             rssi=getattr(adv, "rssi", 0) or 0,
                             manufacturer_data=getattr(adv, "manufacturer_data", {}) or {},
-                            service_data=srv_data,
-                            service_uuids=uuids,
+                            service_data=getattr(adv, "service_data", {}) or {},
+                            service_uuids=getattr(adv, "service_uuids", []) or [],
                             source="local",
                         )
 
@@ -218,7 +199,7 @@ class CuktechChargerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     )
                 else:
                     _LOGGER.warning(
-                        "Active BLE scan saw %d device(s), none with UUID 0xFE95",
+                        "Active BLE scan saw %d device(s), no CUKTECH (njcuk) name",
                         len(results),
                     )
             except Exception as exc:
@@ -274,7 +255,7 @@ class CuktechChargerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     rssi=0,
                     manufacturer_data={},
                     service_data={},
-                    service_uuids=[UUID_FE95],
+                    service_uuids=["0000fe95-0000-1000-8000-00805f9b34fb"],
                     source="manual",
                 )
                 self.context["title_placeholders"] = {
