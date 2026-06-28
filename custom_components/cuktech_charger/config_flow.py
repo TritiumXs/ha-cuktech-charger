@@ -138,9 +138,17 @@ class CuktechChargerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         # Scan for devices
         self._discovered_devices = {}
         # Check already-discovered devices first
-        for service_info in async_discovered_service_info(self.hass, connectable=True):
-            if UUID_FE95 in service_info.service_uuids:
-                self._discovered_devices[service_info.address] = service_info
+        try:
+            service_infos = async_discovered_service_info(self.hass)
+            for service_info in service_infos:
+                uuids = service_info.service_uuids if service_info else []
+                if UUID_FE95 in uuids:
+                    self._discovered_devices[service_info.address] = service_info
+            if self._discovered_devices:
+                _LOGGER.debug("Found %d CUKTECH device(s) via HA Bluetooth cache",
+                              len(self._discovered_devices))
+        except Exception as exc:
+            _LOGGER.debug("Could not query HA Bluetooth cache: %s", exc)
 
         # Also actively scan
         if not self._discovered_devices:
@@ -161,8 +169,8 @@ class CuktechChargerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                             service_uuids=adv.service_uuids,
                             source="local",
                         )
-            except Exception:
-                pass
+            except Exception as exc:
+                _LOGGER.debug("Active BLE scan failed: %s", exc)
 
         if not self._discovered_devices:
             # No devices found; skip to manual MAC entry
