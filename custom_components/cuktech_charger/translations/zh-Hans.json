@@ -1,0 +1,44 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "发现 CUKTECH 充电器",
+        "description": "从下方列表中选择您的 CUKTECH 充电器。\n\n发现 {count} 台设备。请确保充电器已通电且在蓝牙范围内。",
+        "data": {
+          "address": "设备"
+        }
+      },
+      "token": {
+        "title": "验证身份",
+        "description": "为以下设备输入验证凭证：\n\n**{name}** ({address})\n\nToken 可从米家 App 中获取。",
+        "data": {
+          "token": "Token（12 字节 Hex）",
+          "ble_key": "BLE Key（16 字节 Hex，可选）"
+        }
+      },
+      "manual": {
+        "title": "手动输入 MAC 地址",
+        "description": "输入 CUKTECH 充电器的蓝牙 MAC 地址。可在米家 App 中查找，或使用 BLE 扫描工具发现。\n\n格式：AA:BB:CC:DD:EE:FF",
+        "data": {
+          "address": "MAC 地址"
+        }
+      }
+    },
+    "error": {
+      "invalid_mac": "MAC 地址格式无效。请使用 AA:BB:CC:DD:EE:FF 或 AA-BB-CC-DD-EE-FF 格式。",
+      "invalid_token_format": "Token 必须是有效的 Hex 字符串。",
+      "invalid_token_length": "Token 必须为 12 字节（24 个 Hex 字符）。",
+      "invalid_key_format": "BLE Key 必须是有效的 Hex 字符串。",
+      "invalid_key_length": "BLE Key 必须为 16 字节（32 个 Hex 字符）。",
+      "cannot_connect": "无法连接设备。请确保充电器已通电且在蓝牙范围内。",
+      "auth_failed": "验证失败。请检查 Token 后重试。",
+      "missing_deps": "缺少依赖。请确保已安装 bleak 和 cryptography。",
+      "unknown": "发生未知错误。请查看日志获取详细信息。",
+      "no_devices_found": "未发现附近的 CUKTECH 充电器。请确保充电器已通电。"
+    },
+    "abort": {
+      "already_configured": "此设备已配置。",
+      "no_devices_found": "未发现 CUKTECH 充电器。请确保充电器已通电且在蓝牙范围内。"
+    }
+  }
+}

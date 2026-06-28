@@ -9,10 +9,8 @@ import voluptuous as vol
 
 from homeassistant import config_entries
 from homeassistant.components.bluetooth import (
-    BluetoothScanningMode,
     BluetoothServiceInfo,
     async_discovered_service_info,
-    async_process_advertisements,
 )
 from homeassistant.const import CONF_ADDRESS
 from homeassistant.data_entry_flow import FlowResult
@@ -23,12 +21,16 @@ from ._ble import UUID_FE95, CuktechBLEController, require_runtime_dependencies
 
 _LOGGER = logging.getLogger(__name__)
 
-ADDITIONAL_DISCOVERY_TIMEOUT = 30
-
 STEP_TOKEN_SCHEMA = vol.Schema(
     {
         vol.Required("token", description={"suggested_value": ""}): cv.string,
         vol.Optional("ble_key", description={"suggested_value": ""}): cv.string,
+    }
+)
+
+MANUAL_MAC_SCHEMA = vol.Schema(
+    {
+        vol.Required(CONF_ADDRESS, description={"suggested_value": ""}): cv.string,
     }
 )
 
@@ -65,7 +67,7 @@ async def _validate_auth(
         errors["base"] = "missing_deps"
         return errors
 
-    ctrl = CuktechBLEController(mac=mac, token=token, ble_key=ble_key)
+    ctrl = CuktechBLEController(mac=mac, token=token_bytes)
     try:
         connected = await ctrl.connect()
         if not connected:
@@ -119,9 +121,18 @@ class CuktechChargerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
         if user_input is not None:
             address = user_input[CONF_ADDRESS]
+
+            # User chose manual entry
+            if address == "__manual__":
+                return await self.async_step_manual()
+
             await self.async_set_unique_id(address, raise_on_progress=False)
             self._abort_if_unique_id_configured()
             self._discovery_info = self._discovered_devices[address]
+            self.context["title_placeholders"] = {
+                "name": _name_from_discovery(self._discovery_info),
+                "address": self._discovery_info.address,
+            }
             return await self.async_step_token()
 
         # Scan for devices
@@ -154,28 +165,68 @@ class CuktechChargerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 pass
 
         if not self._discovered_devices:
-            errors["base"] = "no_devices_found"
+            # No devices found; skip to manual MAC entry
+            return await self.async_step_manual()
 
-        if errors:
-            return self.async_show_form(
-                step_id="user",
-                data_schema=vol.Schema({}),
-                errors=errors,
-                description_placeholders={},
-            )
+        # Build selection: discovered devices + manual entry option
+        selection: dict[str, str] = {
+            mac: f"{_name_from_discovery(info)} ({mac})"
+            for mac, info in sorted(self._discovered_devices.items())
+        }
+        selection["__manual__"] = "▶ Enter MAC address manually…"
 
         schema = vol.Schema(
             {
-                vol.Required(CONF_ADDRESS): vol.In(
-                    {mac: f"{_name_from_discovery(info)} ({mac})"
-                     for mac, info in self._discovered_devices.items()}
-                ),
+                vol.Required(CONF_ADDRESS): vol.In(selection),
             }
         )
 
         return self.async_show_form(
             step_id="user",
             data_schema=schema,
+            errors=errors,
+            description_placeholders={
+                "count": str(len(self._discovered_devices)),
+            },
+        )
+
+    async def async_step_manual(
+        self, user_input: dict[str, Any] | None = None
+    ) -> FlowResult:
+        """Handle manual MAC address entry (fallback when scan finds nothing)."""
+        errors: dict[str, str] = {}
+
+        if user_input is not None:
+            mac = user_input[CONF_ADDRESS].strip().upper()
+            # Basic MAC validation
+            parts = mac.split(":")
+            if len(parts) != 6 or not all(
+                len(p) == 2 and all(c in "0123456789ABCDEF" for c in p)
+                for p in parts
+            ):
+                errors[CONF_ADDRESS] = "invalid_mac"
+            else:
+                await self.async_set_unique_id(mac, raise_on_progress=False)
+                self._abort_if_unique_id_configured()
+                # Create synthetic discovery info for the manually entered MAC
+                self._discovery_info = BluetoothServiceInfo(
+                    name=f"CUKTECH Charger ({mac})",
+                    address=mac,
+                    rssi=0,
+                    manufacturer_data={},
+                    service_data={},
+                    service_uuids=[UUID_FE95],
+                    source="manual",
+                )
+                self.context["title_placeholders"] = {
+                    "name": self._discovery_info.name,
+                    "address": mac,
+                }
+                return await self.async_step_token()
+
+        return self.async_show_form(
+            step_id="manual",
+            data_schema=MANUAL_MAC_SCHEMA,
             errors=errors,
             description_placeholders={},
         )

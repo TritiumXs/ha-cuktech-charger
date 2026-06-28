@@ -1,0 +1,44 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Discover CUKTECH Charger",
+        "description": "Select your CUKTECH charger from the list below.\n\nFound {count} device(s) nearby. Make sure your charger is powered on and within range.",
+        "data": {
+          "address": "Device"
+        }
+      },
+      "token": {
+        "title": "Authenticate",
+        "description": "Enter the authentication credentials for:\n\n**{name}** ({address})\n\nThe token can be obtained from the Mi Home / Xiaomi Home app.",
+        "data": {
+          "token": "Token (12-byte hex)",
+          "ble_key": "BLE Key (16-byte hex, optional)"
+        }
+      },
+      "manual": {
+        "title": "Enter MAC Address",
+        "description": "Enter the Bluetooth MAC address of your CUKTECH charger. It can be found in the Mi Home / Xiaomi Home app, or by scanning with a BLE tool.\n\nFormat: AA:BB:CC:DD:EE:FF",
+        "data": {
+          "address": "MAC Address"
+        }
+      }
+    },
+    "error": {
+      "invalid_mac": "Invalid MAC address format. Use AA:BB:CC:DD:EE:FF or AA-BB-CC-DD-EE-FF.",
+      "invalid_token_format": "Token must be a valid hex string.",
+      "invalid_token_length": "Token must be exactly 12 bytes (24 hex characters).",
+      "invalid_key_format": "BLE key must be a valid hex string.",
+      "invalid_key_length": "BLE key must be exactly 16 bytes (32 hex characters).",
+      "cannot_connect": "Cannot connect to the device. Make sure it is powered on and in range.",
+      "auth_failed": "Authentication failed. Check your token and try again.",
+      "missing_deps": "Missing dependencies. Make sure bleak and cryptography are installed.",
+      "unknown": "An unexpected error occurred. Check the logs for details.",
+      "no_devices_found": "No CUKTECH chargers found nearby. Make sure the charger is powered on."
+    },
+    "abort": {
+      "already_configured": "This device is already configured.",
+      "no_devices_found": "No CUKTECH chargers found. Make sure your charger is powered on and in range."
+    }
+  }
+}
