@@ -86,7 +86,23 @@ async def _validate_auth(
     return errors
 
 
-def _name_from_discovery(discovery_info: BluetoothServiceInfo) -> str:
+def _has_cuktech_uuid(
+    service_uuids: list[str] | None = None,
+    service_data: dict[str, bytes] | None = None,
+) -> bool:
+    """Return True if UUID_FE95 appears in either service_uuids or service_data keys.
+
+    The CUKTECH charger advertises via the *Service Data* AD type (0x16).
+    Some BLE backends expose the UUID in ``service_uuids``, others only in
+    ``service_data`` keys — therefore both must be checked.
+    """
+    if service_uuids:
+        if any(u.lower() == UUID_FE95 for u in service_uuids):
+            return True
+    if service_data:
+        if any(u.lower() == UUID_FE95 for u in service_data):
+            return True
+    return False
     return discovery_info.name or "CUKTECH Charger"
 
 
@@ -142,14 +158,16 @@ class CuktechChargerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         try:
             service_infos = async_discovered_service_info(self.hass)
             for info in service_infos:
-                # HA normalises UUIDs to UPPERCASE; support both the direct
-                # field (HA ≥ 2024) and the advertisement fallback (HA < 2024)
                 uuids: list[str] = getattr(info, "service_uuids", None) or []
-                if not uuids:
-                    adv = getattr(info, "advertisement", None)
-                    if adv:
+                srv_data: dict = getattr(info, "service_data", None) or {}
+                # also try .advertisement.* for HA < 2024
+                adv = getattr(info, "advertisement", None)
+                if adv is not None:
+                    if not uuids:
                         uuids = getattr(adv, "service_uuids", []) or []
-                if any(u.lower() == UUID_FE95 for u in uuids):
+                    if not srv_data:
+                        srv_data = getattr(adv, "service_data", {}) or {}
+                if _has_cuktech_uuid(uuids, srv_data):
                     self._discovered_devices[info.address] = info
 
             if self._discovered_devices:
@@ -178,7 +196,8 @@ class CuktechChargerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     if adv is None:
                         continue
                     uuids: list[str] = getattr(adv, "service_uuids", []) or []
-                    if any(u.lower() == UUID_FE95 for u in uuids):
+                    srv_data: dict = getattr(adv, "service_data", {}) or {}
+                    if _has_cuktech_uuid(uuids, srv_data):
                         name = getattr(adv, "local_name", None) or getattr(
                             device, "name", None
                         ) or "CUKTECH Charger"
@@ -187,7 +206,7 @@ class CuktechChargerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                             address=mac,
                             rssi=getattr(adv, "rssi", 0) or 0,
                             manufacturer_data=getattr(adv, "manufacturer_data", {}) or {},
-                            service_data=getattr(adv, "service_data", {}) or {},
+                            service_data=srv_data,
                             service_uuids=uuids,
                             source="local",
                         )
