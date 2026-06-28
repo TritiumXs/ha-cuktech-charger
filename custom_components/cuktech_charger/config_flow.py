@@ -94,6 +94,9 @@ def _is_cuktech_device(name: str | None) -> bool:
     cuktech-ble-controller project and is more reliable than UUID matching.
     """
     return bool(name and "njcuk" in name.lower())
+
+
+def _name_from_discovery(discovery_info: BluetoothServiceInfo) -> str:
     return discovery_info.name or "CUKTECH Charger"
 
 
