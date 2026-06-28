@@ -3,7 +3,7 @@
     "step": {
       "user": {
         "title": "Discover CUKTECH Charger",
-        "description": "Select your CUKTECH charger from the below list.\n\nFound {device_count} device(s). Make sure your charger is powered on and within range.",
+        "description": "Choose your CUKTECH charger from the list or enter its MAC address manually.",
         "data": {
           "address": "Device"
         }

@@ -193,9 +193,6 @@ class CuktechChargerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             step_id="user",
             data_schema=schema,
             errors=errors,
-            description_placeholders={
-                "device_count": str(len(self._discovered_devices)),
-            },
         )
 
     async def async_step_manual(
