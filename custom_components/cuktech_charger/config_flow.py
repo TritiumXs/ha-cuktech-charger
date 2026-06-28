@@ -12,11 +12,7 @@ from homeassistant.const import CONF_MAC, CONF_TOKEN
 from homeassistant.core import HomeAssistant
 from homeassistant.data_entry_flow import FlowResult
 from homeassistant.helpers import config_validation as cv
-from homeassistant.components.bluetooth import (
-    async_discovered_service_info,
-    async_get_scanner,
-    BluetoothServiceInfoBleak,
-)
+
 
 from .const import DOMAIN
 from ._ble import UUID_FE95, CuktechBLEController, require_runtime_dependencies
@@ -90,36 +86,20 @@ async def _validate_auth(
     return errors
 
 
-async def _scan_for_devices(hass: HomeAssistant) -> list[BluetoothServiceInfoBleak]:
-    """Scan for CUKTECH chargers using BLE."""
-    devices: list[BluetoothServiceInfoBleak] = []
-
-    # Try HA's built-in bluetooth integration first
-    for service_info in async_discovered_service_info(hass, connectable=True):
-        if UUID_FE95 in service_info.service_uuids:
-            devices.append(service_info)
-
-    if devices:
-        return devices
-
-    # Fallback: use BleakScanner directly
+async def _scan_for_devices() -> dict[str, str]:
+    """Scan for CUKTECH chargers, return {mac: name}."""
+    found: dict[str, str] = {}
     try:
         from bleak import BleakScanner
-
-        scanner = async_get_scanner(hass)
-        if scanner:
-            scanned = await scanner.discover(timeout=10)
-            for device in scanned:
-                if device.advertisement_data and UUID_FE95 in device.advertisement_data.service_uuids:
-                    # Wrap as simple service info
-                    from homeassistant.components.bluetooth import BluetoothServiceInfoBleak
-                    from bleak.backends.device import BLEDevice
-                    # We have a list of BLEDevice, wrap it
-                    pass
-    except Exception:
-        pass
-
-    return devices
+        results = await BleakScanner.discover(timeout=10, return_adv=True)
+        for mac, (device, adv) in results.items():
+            uuids = adv.service_uuids if adv else []
+            if UUID_FE95 in uuids:
+                name = (adv.local_name if adv else None) or device.name or "CUKTECH Charger"
+                found[mac] = name
+    except Exception as exc:
+        _LOGGER.warning("BLE scan failed: %s", exc)
+    return found
 
 
 class CuktechChargerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
@@ -174,27 +154,9 @@ class CuktechChargerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             errors = errs
 
         # Scan for devices
-        try:
-            discovered = await _scan_for_devices(self.hass)
-        except Exception as exc:
-            _LOGGER.exception("Scan failed: %s", exc)
-            discovered = []
-
-        # Also try direct BleakScanner
-        if not discovered:
-            try:
-                from bleak import BleakScanner
-
-                scanner = BleakScanner()
-                ble_devices = await scanner.discover(timeout=10, return_adv=True)
-                for mac, (device, adv) in ble_devices.items():
-                    service_uuids = adv.service_uuids if adv else []
-                    if UUID_FE95 in service_uuids:
-                        name = adv.local_name or device.name or "CUKTECH Charger"
-                        self._discovered_devices[mac] = name
-            except Exception as exc:
-                _LOGGER.warning("Direct BLE scan failed: %s", exc)
-                errors["base"] = "scan_failed"
+        self._discovered_devices = await _scan_for_devices()
+        if not self._discovered_devices:
+            errors["base"] = "no_devices_found"
 
         if not self._discovered_devices:
             # No devices found; allow manual MAC entry
