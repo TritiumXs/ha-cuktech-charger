@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import Any
 
@@ -69,7 +70,24 @@ async def _validate_auth(
 
     ctrl = CuktechBLEController(mac=mac, token=token_bytes)
     try:
-        connected = await ctrl.connect()
+        # Retry connect — HA's BLE scanner holds the adapter slot;
+        # sleeping a few seconds usually lets it finish a scan cycle.
+        connected = False
+        for attempt in range(1, 6):
+            try:
+                connected = await ctrl.connect()
+            except Exception as exc:
+                _LOGGER.debug(
+                    "Connect attempt %d/5 for %s failed: %s", attempt, mac, exc
+                )
+            if connected:
+                break
+            if attempt < 5:
+                _LOGGER.info(
+                    "Retrying connect for %s in %ds …", mac, attempt * 2
+                )
+                await asyncio.sleep(attempt * 2)
+
         if not connected:
             errors["base"] = "cannot_connect"
             return errors
