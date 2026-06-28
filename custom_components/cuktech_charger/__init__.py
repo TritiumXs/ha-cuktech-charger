@@ -5,7 +5,7 @@ import logging
 from typing import Any
 
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import CONF_MAC, CONF_TOKEN, Platform
+from homeassistant.const import CONF_ADDRESS, "token", Platform
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import device_registry as dr
 
@@ -27,8 +27,8 @@ async def async_setup_entry(
     hass: HomeAssistant, entry: CuktechChargerConfigEntry
 ) -> bool:
     """Set up CUKTECH GaN Charger from a config entry."""
-    mac: str = entry.data[CONF_MAC]
-    token: str = entry.data[CONF_TOKEN]
+    mac: str = entry.data[CONF_ADDRESS]
+    token: str = entry.data["token"]
     ble_key: str | None = entry.data.get("ble_key") or None
 
     coordinator = CuktechChargerCoordinator(

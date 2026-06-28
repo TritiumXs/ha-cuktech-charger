@@ -8,19 +8,24 @@ from typing import Any
 import voluptuous as vol
 
 from homeassistant import config_entries
-from homeassistant.const import CONF_MAC, CONF_TOKEN
-from homeassistant.core import HomeAssistant
+from homeassistant.components.bluetooth import (
+    BluetoothScanningMode,
+    BluetoothServiceInfo,
+    async_discovered_service_info,
+    async_process_advertisements,
+)
+from homeassistant.const import CONF_ADDRESS
 from homeassistant.data_entry_flow import FlowResult
 from homeassistant.helpers import config_validation as cv
-from homeassistant.components.bluetooth import BluetoothServiceInfoBleak
-
 
 from .const import DOMAIN
 from ._ble import UUID_FE95, CuktechBLEController, require_runtime_dependencies
 
 _LOGGER = logging.getLogger(__name__)
 
-STEP_AUTH_SCHEMA = vol.Schema(
+ADDITIONAL_DISCOVERY_TIMEOUT = 30
+
+STEP_TOKEN_SCHEMA = vol.Schema(
     {
         vol.Required("token", description={"suggested_value": ""}): cv.string,
         vol.Optional("ble_key", description={"suggested_value": ""}): cv.string,
@@ -29,15 +34,11 @@ STEP_AUTH_SCHEMA = vol.Schema(
 
 
 async def _validate_auth(
-    hass: HomeAssistant, mac: str, token: str, ble_key: str | None
+    mac: str, token: str, ble_key: str | None
 ) -> dict[str, str]:
-    """Validate authentication by connecting to the device.
-
-    Returns a dict with errors on failure, or empty dict on success.
-    """
+    """Validate authentication. Returns errors dict or empty."""
     errors: dict[str, str] = {}
 
-    # Validate token is 12-byte hex
     try:
         token_bytes = bytes.fromhex(token)
     except ValueError:
@@ -47,8 +48,6 @@ async def _validate_auth(
         errors["token"] = "invalid_token_length"
         return errors
 
-    # Validate optional BLE key is 16-byte hex
-    key_bytes: bytes | None = None
     if ble_key:
         try:
             key_bytes = bytes.fromhex(ble_key)
@@ -66,20 +65,18 @@ async def _validate_auth(
         errors["base"] = "missing_deps"
         return errors
 
-    # Attempt connection and auth
-    ctrl = CuktechBLEController(mac=mac, token=token_bytes)
+    ctrl = CuktechBLEController(mac=mac, token=token, ble_key=ble_key)
     try:
         connected = await ctrl.connect()
         if not connected:
             errors["base"] = "cannot_connect"
             return errors
-
         auth_ok = await ctrl.authenticate()
         if not auth_ok:
             errors["base"] = "auth_failed"
             return errors
     except Exception as exc:
-        _LOGGER.exception("Connection/auth error for %s: %s", mac, exc)
+        _LOGGER.exception("Auth error for %s: %s", mac, exc)
         errors["base"] = "unknown"
     finally:
         await ctrl.disconnect()
@@ -87,20 +84,8 @@ async def _validate_auth(
     return errors
 
 
-async def _scan_for_devices() -> dict[str, str]:
-    """Scan for CUKTECH chargers, return {mac: name}."""
-    found: dict[str, str] = {}
-    try:
-        from bleak import BleakScanner
-        results = await BleakScanner.discover(timeout=10, return_adv=True)
-        for mac, (device, adv) in results.items():
-            uuids = adv.service_uuids if adv else []
-            if UUID_FE95 in uuids:
-                name = (adv.local_name if adv else None) or device.name or "CUKTECH Charger"
-                found[mac] = name
-    except Exception as exc:
-        _LOGGER.warning("BLE scan failed: %s", exc)
-    return found
+def _name_from_discovery(discovery_info: BluetoothServiceInfo) -> str:
+    return discovery_info.name or "CUKTECH Charger"
 
 
 class CuktechChargerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
@@ -110,126 +95,124 @@ class CuktechChargerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
     def __init__(self) -> None:
         """Initialize the config flow."""
-        self._token: str = ""
-        self._ble_key: str | None = None
-        self._discovered_devices: dict[str, str] = {}  # MAC -> name
+        self._discovery_info: BluetoothServiceInfo | None = None
+        self._discovered_devices: dict[str, BluetoothServiceInfo] = {}
+
+    async def async_step_bluetooth(
+        self, discovery_info: BluetoothServiceInfo
+    ) -> FlowResult:
+        """Handle bluetooth discovery - triggered by HA when a 0xFE95 device is found."""
+        await self.async_set_unique_id(discovery_info.address)
+        self._abort_if_unique_id_configured()
+
+        self._discovery_info = discovery_info
+        name = _name_from_discovery(discovery_info)
+        self.context["title_placeholders"] = {"name": name}
+
+        return await self.async_step_token()
 
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None
     ) -> FlowResult:
-        """Handle the initial step - enter auth credentials."""
-        if user_input is not None:
-            self._token = user_input["token"]
-            self._ble_key = user_input.get("ble_key") or None
-            return await self.async_step_device()
-
-        return self.async_show_form(
-            step_id="user",
-            data_schema=STEP_AUTH_SCHEMA,
-            description_placeholders={},
-        )
-
-    async def async_step_device(
-        self, user_input: dict[str, Any] | None = None
-    ) -> FlowResult:
-        """Handle the device selection step."""
+        """Handle manual user start - scan first, then pick device."""
         errors: dict[str, str] = {}
 
         if user_input is not None:
-            mac = user_input[CONF_MAC]
-            # Validate auth
-            errs = await _validate_auth(
-                self.hass, mac, self._token, self._ble_key
-            )
-            if not errs:
-                await self.async_set_unique_id(mac.lower().replace(":", "_"))
-                self._abort_if_unique_id_configured()
-                return self.async_create_entry(
-                    title=self._discovered_devices.get(mac, mac),
-                    data={
-                        CONF_MAC: mac,
-                        CONF_TOKEN: self._token,
-                        "ble_key": self._ble_key or "",
-                    },
-                )
-            errors = errs
+            address = user_input[CONF_ADDRESS]
+            await self.async_set_unique_id(address, raise_on_progress=False)
+            self._abort_if_unique_id_configured()
+            self._discovery_info = self._discovered_devices[address]
+            return await self.async_step_token()
 
-        # Scan for devices (only on first entry, not on form submit)
-        if not self._discovered_devices and user_input is None:
-            self._discovered_devices = await _scan_for_devices()
+        # Scan for devices
+        self._discovered_devices = {}
+        # Check already-discovered devices first
+        for service_info in async_discovered_service_info(self.hass, connectable=True):
+            if UUID_FE95 in service_info.service_uuids:
+                self._discovered_devices[service_info.address] = service_info
+
+        # Also actively scan
+        if not self._discovered_devices:
+            try:
+                from bleak import BleakScanner
+
+                scanner = BleakScanner()
+                devices = await scanner.discover(timeout=10, return_adv=True)
+                for mac, (_, adv) in devices.items():
+                    if adv and UUID_FE95 in adv.service_uuids:
+                        name = adv.local_name or "CUKTECH Charger"
+                        self._discovered_devices[mac] = BluetoothServiceInfo(
+                            name=name,
+                            address=mac,
+                            rssi=adv.rssi,
+                            manufacturer_data=adv.manufacturer_data,
+                            service_data=adv.service_data,
+                            service_uuids=adv.service_uuids,
+                            source="local",
+                        )
+            except Exception:
+                pass
+
         if not self._discovered_devices:
             errors["base"] = "no_devices_found"
-            return await self.async_step_manual()
+
+        if errors:
+            return self.async_show_form(
+                step_id="user",
+                data_schema=vol.Schema({}),
+                errors=errors,
+                description_placeholders={},
+            )
 
         schema = vol.Schema(
             {
-                vol.Required(CONF_MAC): vol.In(
-                    {mac: f"{name} ({mac})" for mac, name in self._discovered_devices.items()}
+                vol.Required(CONF_ADDRESS): vol.In(
+                    {mac: f"{_name_from_discovery(info)} ({mac})"
+                     for mac, info in self._discovered_devices.items()}
                 ),
             }
         )
 
         return self.async_show_form(
-            step_id="device",
-            data_schema=schema,
-            errors=errors,
-        )
-
-    async def async_step_manual(
-        self, user_input: dict[str, Any] | None = None
-    ) -> FlowResult:
-        """Handle manual MAC entry."""
-        errors: dict[str, str] = {}
-
-        if user_input is not None:
-            mac = user_input[CONF_MAC].strip().upper()
-            # Basic MAC validation
-            parts = mac.split(":")
-            if len(parts) != 6 or not all(
-                len(p) == 2 and all(c in "0123456789ABCDEF" for c in p) for p in parts
-            ):
-                errors[CONF_MAC] = "invalid_mac"
-            else:
-                errs = await _validate_auth(
-                    self.hass, mac, self._token, self._ble_key
-                )
-                if not errs:
-                    await self.async_set_unique_id(mac.lower().replace(":", "_"))
-                    self._abort_if_unique_id_configured()
-                    return self.async_create_entry(
-                        title=f"CUKTECH Charger ({mac})",
-                        data={
-                            CONF_MAC: mac,
-                            CONF_TOKEN: self._token,
-                            "ble_key": self._ble_key or "",
-                        },
-                    )
-                errors = errs
-
-        schema = vol.Schema(
-            {
-                vol.Required(CONF_MAC): cv.string,
-            }
-        )
-
-        return self.async_show_form(
-            step_id="manual",
+            step_id="user",
             data_schema=schema,
             errors=errors,
             description_placeholders={},
         )
 
-    async def async_step_bluetooth(
-        self, discovery_info: BluetoothServiceInfoBleak
+    async def async_step_token(
+        self, user_input: dict[str, Any] | None = None
     ) -> FlowResult:
-        """Handle bluetooth discovery - auto-triggered by HA when device is found."""
-        mac = discovery_info.address
-        name = discovery_info.name or "CUKTECH Charger"
+        """Handle token input step."""
+        assert self._discovery_info
 
-        await self.async_set_unique_id(mac.lower().replace(":", "_"))
-        self._abort_if_unique_id_configured()
+        errors: dict[str, str] = {}
 
-        self._discovered_devices[mac] = name
-        self.context["title_placeholders"] = {"name": name, "mac": mac}
+        if user_input is not None:
+            token = user_input["token"]
+            ble_key = user_input.get("ble_key") or None
 
-        return await self.async_step_user()
+            # Validate by connecting
+            errs = await _validate_auth(
+                self._discovery_info.address, token, ble_key
+            )
+            if not errs:
+                return self.async_create_entry(
+                    title=_name_from_discovery(self._discovery_info),
+                    data={
+                        CONF_ADDRESS: self._discovery_info.address,
+                        "token": token,
+                        "ble_key": ble_key or "",
+                    },
+                )
+            errors = errs
+
+        return self.async_show_form(
+            step_id="token",
+            data_schema=STEP_TOKEN_SCHEMA,
+            errors=errors,
+            description_placeholders={
+                "name": _name_from_discovery(self._discovery_info),
+                "address": self._discovery_info.address,
+            },
+        )

@@ -10,7 +10,7 @@ from typing import Any
 
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
-from homeassistant.const import CONF_MAC, CONF_TOKEN
+from homeassistant.const import CONF_ADDRESS, "token"
 
 from ._ble import (
     CuktechBLEController,
