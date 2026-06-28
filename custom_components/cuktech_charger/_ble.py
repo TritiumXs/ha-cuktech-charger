@@ -186,12 +186,28 @@ def require_runtime_dependencies():
 class CuktechBLEController:
     """CUKTECH 充电器 BLE 直连控制器。"""
 
-    def __init__(self, mac=DEVICE_MAC, token=DEVICE_TOKEN, product_id=PRODUCT_ID):
+    def __init__(
+        self,
+        mac=DEVICE_MAC,
+        token=DEVICE_TOKEN,
+        product_id=PRODUCT_ID,
+        ble_device=None,
+    ):
+        """Args:
+        mac: Bluetooth address string (AA:BB:CC:DD:EE:FF).
+        token: 12-byte token as bytes.
+        product_id: Xiaomi product ID (default 0x660e).
+        ble_device: Optional BLEDevice from HA's Bluetooth manager.
+                     When provided, BleakClient will use it instead of
+                     the raw address, so HA's connection-slot management
+                     works correctly (no scanner contention).
+        """
         require_runtime_dependencies()
         self.mac = mac
         self.token = token
         self.product_id = product_id
         self.mac_bytes = mac_str_to_bytes(mac)
+        self.ble_device = ble_device
         self.client = None
         self.authenticated = False
         self._notify_queues = {}
@@ -270,9 +286,18 @@ class CuktechBLEController:
             return data
 
     async def connect(self):
-        """Connect to the device."""
+        """Connect to the device.
+
+        When ``ble_device`` (a BLEDevice from HA's Bluetooth manager) was
+        passed to the constructor, it is used directly.  This lets HA's
+        connection-slot management avoid scanner contention — exactly how
+        xiaomi_ble does it.
+        """
         print(f"[*] 正在连接 {self.mac}...")
-        self.client = BleakClient(self.mac)
+        if self.ble_device is not None:
+            self.client = BleakClient(self.ble_device)
+        else:
+            self.client = BleakClient(self.mac)
         await self.client.connect()
         print(f"[+] 已连接! MTU={self.client.mtu_size}")
 

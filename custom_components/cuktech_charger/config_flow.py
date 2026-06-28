@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import logging
 from typing import Any
 
@@ -11,9 +10,11 @@ import voluptuous as vol
 from homeassistant import config_entries
 from homeassistant.components.bluetooth import (
     BluetoothServiceInfo,
+    async_ble_device_from_address,
     async_discovered_service_info,
 )
 from homeassistant.const import CONF_ADDRESS
+from homeassistant.core import HomeAssistant
 from homeassistant.data_entry_flow import FlowResult
 from homeassistant.helpers import config_validation as cv
 
@@ -37,9 +38,14 @@ MANUAL_MAC_SCHEMA = vol.Schema(
 
 
 async def _validate_auth(
-    mac: str, token: str, ble_key: str | None
+    hass: HomeAssistant, mac: str, token: str, ble_key: str | None
 ) -> dict[str, str]:
-    """Validate authentication. Returns errors dict or empty."""
+    """Validate authentication by connecting to the device.
+
+    Uses HA's Bluetooth manager to obtain a BLEDevice so the connection
+    shares the adapter properly (no scanner-slot contention), following
+    the same pattern as xiaomi_ble.
+    """
     errors: dict[str, str] = {}
 
     try:
@@ -53,11 +59,11 @@ async def _validate_auth(
 
     if ble_key:
         try:
-            key_bytes = bytes.fromhex(ble_key)
+            bytes.fromhex(ble_key)
         except ValueError:
             errors["ble_key"] = "invalid_key_format"
             return errors
-        if len(key_bytes) != 16:
+        if len(bytes.fromhex(ble_key)) != 16:
             errors["ble_key"] = "invalid_key_length"
             return errors
 
@@ -68,26 +74,13 @@ async def _validate_auth(
         errors["base"] = "missing_deps"
         return errors
 
-    ctrl = CuktechBLEController(mac=mac, token=token_bytes)
-    try:
-        # Retry connect — HA's BLE scanner holds the adapter slot;
-        # sleeping a few seconds usually lets it finish a scan cycle.
-        connected = False
-        for attempt in range(1, 6):
-            try:
-                connected = await ctrl.connect()
-            except Exception as exc:
-                _LOGGER.debug(
-                    "Connect attempt %d/5 for %s failed: %s", attempt, mac, exc
-                )
-            if connected:
-                break
-            if attempt < 5:
-                _LOGGER.info(
-                    "Retrying connect for %s in %ds …", mac, attempt * 2
-                )
-                await asyncio.sleep(attempt * 2)
+    ble_device = async_ble_device_from_address(hass, mac.upper(), connectable=True)
+    if ble_device is None:
+        _LOGGER.warning("No BLEDevice found for %s — falling back to address", mac)
 
+    ctrl = CuktechBLEController(mac=mac, token=token_bytes, ble_device=ble_device)
+    try:
+        connected = await ctrl.connect()
         if not connected:
             errors["base"] = "cannot_connect"
             return errors
@@ -306,7 +299,7 @@ class CuktechChargerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
             # Validate by connecting
             errs = await _validate_auth(
-                self._discovery_info.address, token, ble_key
+                self.hass, self._discovery_info.address, token, ble_key
             )
             if not errs:
                 return self.async_create_entry(

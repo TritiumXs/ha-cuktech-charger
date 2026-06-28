@@ -8,6 +8,7 @@ from datetime import timedelta
 import logging
 from typing import Any
 
+from homeassistant.components.bluetooth import async_ble_device_from_address
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 from homeassistant.const import CONF_ADDRESS
@@ -111,7 +112,10 @@ class CuktechChargerCoordinator(DataUpdateCoordinator[ChargerState]):
         )
 
         token_bytes = bytes.fromhex(token)
-        self._controller = CuktechBLEController(mac=mac, token=token_bytes)
+        ble_device = async_ble_device_from_address(hass, mac.upper(), connectable=True)
+        self._controller = CuktechBLEController(
+            mac=mac, token=token_bytes, ble_device=ble_device
+        )
         self._mac = mac
         self._ble_key = ble_key
         self._reconnect_task: asyncio.Task | None = None
