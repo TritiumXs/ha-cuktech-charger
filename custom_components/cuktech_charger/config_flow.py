@@ -142,23 +142,23 @@ class CuktechChargerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             service_infos = async_discovered_service_info(self.hass)
             for service_info in service_infos:
                 uuids = service_info.service_uuids if service_info else []
-                if UUID_FE95 in uuids:
+                # HA normalises UUIDs to uppercase, _ble.UUID_FE95 is lowercase
+                if any(u.lower() == UUID_FE95 for u in uuids):
                     self._discovered_devices[service_info.address] = service_info
             if self._discovered_devices:
                 _LOGGER.debug("Found %d CUKTECH device(s) via HA Bluetooth cache",
                               len(self._discovered_devices))
         except Exception as exc:
-            _LOGGER.debug("Could not query HA Bluetooth cache: %s", exc)
+            _LOGGER.warning("Could not query HA Bluetooth cache: %s", exc)
 
         # Also actively scan
         if not self._discovered_devices:
             try:
                 from bleak import BleakScanner
 
-                scanner = BleakScanner()
-                devices = await scanner.discover(timeout=10, return_adv=True)
+                devices = await BleakScanner.discover(timeout=10, return_adv=True)
                 for mac, (_, adv) in devices.items():
-                    if adv and UUID_FE95 in adv.service_uuids:
+                    if adv and any(u.lower() == UUID_FE95 for u in adv.service_uuids):
                         name = adv.local_name or "CUKTECH Charger"
                         self._discovered_devices[mac] = BluetoothServiceInfo(
                             name=name,
