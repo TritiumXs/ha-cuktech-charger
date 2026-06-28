@@ -154,13 +154,11 @@ class CuktechChargerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 )
             errors = errs
 
-        # Scan for devices
-        self._discovered_devices = await _scan_for_devices()
+        # Scan for devices (only on first entry, not on form submit)
+        if not self._discovered_devices and user_input is None:
+            self._discovered_devices = await _scan_for_devices()
         if not self._discovered_devices:
             errors["base"] = "no_devices_found"
-
-        if not self._discovered_devices:
-            # No devices found; allow manual MAC entry
             return await self.async_step_manual()
 
         schema = vol.Schema(
