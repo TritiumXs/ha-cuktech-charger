@@ -194,7 +194,7 @@ class CuktechChargerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             data_schema=schema,
             errors=errors,
             description_placeholders={
-                "count": str(len(self._discovered_devices)),
+                "device_count": str(len(self._discovered_devices)),
             },
         )
 

@@ -3,7 +3,7 @@
     "step": {
       "user": {
         "title": "发现 CUKTECH 充电器",
-        "description": "从下方列表中选择您的 CUKTECH 充电器。\n\n发现 {count} 台设备。请确保充电器已通电且在蓝牙范围内。",
+        "description": "从下方列表中选择您的 CUKTECH 充电器。\n\n发现 {device_count} 台设备。请确保充电器已通电且在蓝牙范围内。",
         "data": {
           "address": "设备"
         }
