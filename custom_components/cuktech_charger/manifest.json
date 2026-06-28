@@ -1,0 +1,12 @@
+{
+  "domain": "cuktech_charger",
+  "name": "CUKTECH GaN Charger",
+  "version": "0.1.0",
+  "config_flow": true,
+  "dependencies": [],
+  "requirements": ["bleak>=0.21.0", "cryptography>=41.0.0"],
+  "iot_class": "local_push",
+  "codeowners": ["@cuktech-community"],
+  "documentation": "https://github.com/your-username/ha-cuktech",
+  "issue_tracker": "https://github.com/your-username/ha-cuktech/issues"
+}
