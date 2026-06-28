@@ -3,10 +3,13 @@
   "name": "CUKTECH GaN Charger",
   "version": "0.1.0",
   "config_flow": true,
-  "dependencies": [],
+  "dependencies": ["bluetooth"],
   "requirements": ["bleak>=0.21.0", "cryptography>=41.0.0"],
   "iot_class": "local_push",
-  "codeowners": ["@cuktech-community"],
-  "documentation": "https://github.com/your-username/ha-cuktech",
-  "issue_tracker": "https://github.com/your-username/ha-cuktech/issues"
+  "codeowners": ["@TritiumXs"],
+  "documentation": "https://github.com/TritiumXs/ha-cuktech-charger",
+  "issue_tracker": "https://github.com/TritiumXs/ha-cuktech-charger/issues",
+  "bluetooth": [
+    {"service_uuid": "0000fe95-0000-1000-8000-00805f9b34fb"}
+  ]
 }

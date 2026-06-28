@@ -12,6 +12,7 @@ from homeassistant.const import CONF_MAC, CONF_TOKEN
 from homeassistant.core import HomeAssistant
 from homeassistant.data_entry_flow import FlowResult
 from homeassistant.helpers import config_validation as cv
+from homeassistant.components.bluetooth import BluetoothServiceInfoBleak
 
 
 from .const import DOMAIN
@@ -219,3 +220,18 @@ class CuktechChargerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             errors=errors,
             description_placeholders={},
         )
+
+    async def async_step_bluetooth(
+        self, discovery_info: BluetoothServiceInfoBleak
+    ) -> FlowResult:
+        """Handle bluetooth discovery - auto-triggered by HA when device is found."""
+        mac = discovery_info.address
+        name = discovery_info.name or "CUKTECH Charger"
+
+        await self.async_set_unique_id(mac.lower().replace(":", "_"))
+        self._abort_if_unique_id_configured()
+
+        self._discovered_devices[mac] = name
+        self.context["title_placeholders"] = {"name": name, "mac": mac}
+
+        return await self.async_step_user()
