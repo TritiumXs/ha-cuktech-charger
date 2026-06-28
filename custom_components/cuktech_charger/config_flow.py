@@ -135,45 +135,80 @@ class CuktechChargerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             }
             return await self.async_step_token()
 
-        # Scan for devices
+        # ── Scan for nearby CUKTECH chargers ──────────────────────────
         self._discovered_devices = {}
-        # Check already-discovered devices first
+
+        # 1) Try HA Bluetooth integration cache (fast, no active scan)
         try:
             service_infos = async_discovered_service_info(self.hass)
-            for service_info in service_infos:
-                uuids = service_info.service_uuids if service_info else []
-                # HA normalises UUIDs to uppercase, _ble.UUID_FE95 is lowercase
+            for info in service_infos:
+                # HA normalises UUIDs to UPPERCASE; support both the direct
+                # field (HA ≥ 2024) and the advertisement fallback (HA < 2024)
+                uuids: list[str] = getattr(info, "service_uuids", None) or []
+                if not uuids:
+                    adv = getattr(info, "advertisement", None)
+                    if adv:
+                        uuids = getattr(adv, "service_uuids", []) or []
                 if any(u.lower() == UUID_FE95 for u in uuids):
-                    self._discovered_devices[service_info.address] = service_info
+                    self._discovered_devices[info.address] = info
+
             if self._discovered_devices:
-                _LOGGER.debug("Found %d CUKTECH device(s) via HA Bluetooth cache",
-                              len(self._discovered_devices))
+                _LOGGER.info(
+                    "Found %d CUKTECH charger(s) via HA Bluetooth cache",
+                    len(self._discovered_devices),
+                )
+            else:
+                _LOGGER.info(
+                    "HA Bluetooth cache had %d total device(s), none with UUID 0xFE95",
+                    len(service_infos),
+                )
         except Exception as exc:
             _LOGGER.warning("Could not query HA Bluetooth cache: %s", exc)
 
-        # Also actively scan
+        # 2) Fall back to an active BLE scan (needed when HA cache is empty)
         if not self._discovered_devices:
             try:
                 from bleak import BleakScanner
 
-                devices = await BleakScanner.discover(timeout=10, return_adv=True)
-                for mac, (_, adv) in devices.items():
-                    if adv and any(u.lower() == UUID_FE95 for u in adv.service_uuids):
-                        name = adv.local_name or "CUKTECH Charger"
+                _LOGGER.info("Starting active BLE scan (10 s timeout) …")
+                results = await BleakScanner.discover(timeout=10, return_adv=True)
+                _LOGGER.info("BLE scan finished: %d device(s) seen", len(results))
+
+                for mac, (device, adv) in results.items():
+                    if adv is None:
+                        continue
+                    uuids: list[str] = getattr(adv, "service_uuids", []) or []
+                    if any(u.lower() == UUID_FE95 for u in uuids):
+                        name = getattr(adv, "local_name", None) or getattr(
+                            device, "name", None
+                        ) or "CUKTECH Charger"
                         self._discovered_devices[mac] = BluetoothServiceInfo(
                             name=name,
                             address=mac,
-                            rssi=adv.rssi,
-                            manufacturer_data=adv.manufacturer_data,
-                            service_data=adv.service_data,
-                            service_uuids=adv.service_uuids,
+                            rssi=getattr(adv, "rssi", 0) or 0,
+                            manufacturer_data=getattr(adv, "manufacturer_data", {}) or {},
+                            service_data=getattr(adv, "service_data", {}) or {},
+                            service_uuids=uuids,
                             source="local",
                         )
+
+                if self._discovered_devices:
+                    _LOGGER.info(
+                        "Found %d CUKTECH charger(s) via active BLE scan",
+                        len(self._discovered_devices),
+                    )
+                else:
+                    _LOGGER.warning(
+                        "Active BLE scan saw %d device(s), none with UUID 0xFE95",
+                        len(results),
+                    )
             except Exception as exc:
-                _LOGGER.debug("Active BLE scan failed: %s", exc)
+                _LOGGER.warning("Active BLE scan failed: %s", exc)
 
         if not self._discovered_devices:
-            # No devices found; skip to manual MAC entry
+            _LOGGER.warning(
+                "No CUKTECH charger found – falling back to manual MAC entry"
+            )
             return await self.async_step_manual()
 
         # Build selection: discovered devices + manual entry option
