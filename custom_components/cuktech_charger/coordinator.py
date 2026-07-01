@@ -133,10 +133,20 @@ class CuktechChargerCoordinator(DataUpdateCoordinator[ChargerState]):
         """Return the underlying BLE controller."""
         return self._controller
 
+    def _needs_reconnect(self) -> bool:
+        """Check if the BLE connection needs to be re-established."""
+        if not self._controller.authenticated:
+            return True
+        if not self._controller.client or not self._controller.client.is_connected:
+            self._controller.authenticated = False
+            return True
+        return False
+
     async def _async_update_data(self) -> ChargerState:
         """Fetch data from the device (called periodically)."""
-        if not self._controller.authenticated:
-            await self._connect_and_auth()
+        if self._needs_reconnect():
+            if not await self._connect_and_auth():
+                raise UpdateFailed("Failed to connect/authenticate to charger")
 
         state = ChargerState()
 
@@ -169,21 +179,26 @@ class CuktechChargerCoordinator(DataUpdateCoordinator[ChargerState]):
         return state
 
     async def _connect_and_auth(self) -> bool:
-        """Connect and authenticate to the charger."""
-        try:
-            await self._controller.connect()
-            _LOGGER.info("Connected to %s", self._mac)
-            result = await self._controller.authenticate()
-            if result:
-                _LOGGER.info("Authenticated successfully to %s", self._mac)
-                await self._start_background_drain()
-                return True
-            else:
+        """Connect and authenticate to the charger, with retry."""
+        max_retries = 3
+        for attempt in range(max_retries):
+            try:
+                await self._controller.connect()
+                _LOGGER.info("Connected to %s", self._mac)
+                result = await self._controller.authenticate()
+                if result:
+                    _LOGGER.info("Authenticated successfully to %s", self._mac)
+                    await self._start_background_drain()
+                    return True
                 _LOGGER.error("Authentication failed for %s", self._mac)
-                return False
-        except Exception as exc:
-            _LOGGER.exception("Failed to connect/auth to %s: %s", self._mac, exc)
-            return False
+            except Exception as exc:
+                _LOGGER.warning(
+                    "Connect/auth attempt %d/%d failed: %s",
+                    attempt + 1, max_retries, exc,
+                )
+            if attempt < max_retries - 1:
+                await asyncio.sleep(2 * (attempt + 1))
+        return False
 
     async def _start_background_drain(self) -> None:
         """Start background task that drains push notifications."""
@@ -280,8 +295,10 @@ class CuktechChargerCoordinator(DataUpdateCoordinator[ChargerState]):
 
         Returns True on success.
         """
-        if not self._controller.authenticated:
-            await self._connect_and_auth()
+        if self._needs_reconnect():
+            if not await self._connect_and_auth():
+                _LOGGER.error("Cannot set PIID %d: reconnect failed", piid)
+                return False
 
         try:
             result = await self._controller.send_miot_command(
@@ -297,8 +314,10 @@ class CuktechChargerCoordinator(DataUpdateCoordinator[ChargerState]):
 
     async def async_get_port_control(self) -> int | None:
         """Read current port control bitmask (PIID 16)."""
-        if not self._controller.authenticated:
-            await self._connect_and_auth()
+        if self._needs_reconnect():
+            if not await self._connect_and_auth():
+                _LOGGER.error("Cannot get port control: reconnect failed")
+                return None
 
         try:
             result = await self._controller.send_miot_command(
