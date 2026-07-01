@@ -197,6 +197,10 @@ class CuktechChargerCoordinator(DataUpdateCoordinator[ChargerState]):
                     attempt + 1, max_retries, exc,
                 )
             if attempt < max_retries - 1:
+                try:
+                    await self._controller.disconnect()
+                except Exception:
+                    pass
                 await asyncio.sleep(2 * (attempt + 1))
         return False
 

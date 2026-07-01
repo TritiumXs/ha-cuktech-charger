@@ -88,6 +88,12 @@ async def _validate_auth(
                 )
             if connected:
                 break
+            # Clean up stale client before retry — a failed BleakClient
+            # may still hold the adapter slot
+            try:
+                await ctrl.disconnect()
+            except Exception:
+                pass
             if attempt < 5:
                 _LOGGER.info(
                     "Retrying connect for %s in %ds …", mac, attempt * 2
